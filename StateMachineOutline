@@ -1,0 +1,206 @@
+#include <Arduino_LSM6DS3.h>
+
+
+
+float shake_sensor;
+bool armed_led;
+bool disarmed_led;
+bool pir_sensor;
+bool manual_event;
+
+int redLed  = 2;
+int greenLed = 3;
+int blueLed = 4;
+int pirPin = 8;
+
+typedef enum
+{
+  ARM_ON,
+  TRG_SIG,
+  ARM_OFF,
+  TRG_BTN,
+  TMR_DONE,
+} TransitionEvent_e;
+
+typedef enum
+{
+  DISARMED,
+  ARMED,
+  TRIGGERED,
+} state_e;
+
+float Gx, Gy, Gz; // Gyro readings
+int state = DISARMED;
+
+
+void setup() {
+  pinMode (redLed, OUTPUT);
+  pinMode (greenLed, OUTPUT);
+  pinMode (blueLed, OUTPUT);
+  pinMode (pirPin, INPUT);
+
+  Serial.begin(9600);
+}
+
+void loop() {
+  ArduinoCloud.update();
+  DoInState();
+  if (IMU.gyroscopeAvailable()) {
+    IMU.readGyroscope(Gx, Gy, Gz);
+  } else {
+    Serial.println ("Shake alarm not Available");
+  }
+  // Read Motion Alarm
+  pir_sensor = digitalRead (pirPin);
+  shake_sensor = Gy;
+  // Read Shake Alarm and determine its threshhold
+  if (Gy > 50 || Gy < -50) {
+    shake_sensor = true;
+  } else {
+    shake_sensor = false;
+  }
+
+  if ((armed_led == true) && (pir_sensor == HIGH) || (shake_sensor == true)) {
+    alarmActivate ();
+  }
+  if ((disarmed_led == true) && (manual_event == true)) {
+    digitalWrite (blueLed, HIGH);
+  } else {
+    digitalWrite (blueLed, LOW);
+  }
+}
+
+void onArmedLedChange()  {
+  if (armed_led == true) {
+    digitalWrite (redLed, HIGH);
+  } else {
+    digitalWrite (redLed, LOW);
+  }
+}
+
+void onDisarmedLedChange()  {
+  if (disarmed_led == true) {
+    digitalWrite (greenLed, HIGH);
+  } else {
+    digitalWrite (greenLed, LOW);
+  }
+}
+
+void onPirSensorChange()  {
+  // do something
+}
+
+void onShakeSensorChange()  {
+  // Add your code here to act upon ShakeSensor change
+}
+
+void alarmActivate ()  {
+  digitalWrite (blueLed, HIGH);
+  delay (5000);
+  digitalWrite (blueLed, LOW);
+}
+
+void onManualEventChange()  {
+
+}
+
+void onSwitchDummyVarChange()  {
+  // Add your code here to act upon SwitchDummyVar change
+}
+
+void onArmingButtonChange()  {
+  // Add your code here to act upon ArmingButton change
+  TransitionEvent_e event;
+  if ( armingButton == true ) {
+    TransitionFSM( ARM_ON );
+  }
+  else {
+    TransitionFSM( ARM_OFF );
+  }
+}
+void TransitionFSM( TransitionEvent_e event);
+void EnterState( void );
+void DoInState( void );
+
+
+
+void TransitionFSM( TransitionEvent_e event)
+{
+  int validTransition = 0;
+  switch ( state)
+  {
+    case DISARMED:
+      if ( event == ARM_ON ) {
+        validTransition = 1;
+        state = ARMED;
+      } else if ( event == TRG_BTN ) {
+        validTransition = 1;
+        state = TRIGGERED;
+      }
+      break;
+
+    case ARMED:
+      // add stuff
+      break;
+
+    case TRIGGERED:
+      if ( event == TMR_DONE) {
+        validTransition = 1;
+        state = DISARMED;
+      }
+      break;
+
+    default:
+      // should'nt get here
+      break;
+  }
+  if ( validTransition == 1 )
+  {
+    EnterState();
+  }
+}
+
+void EnterState( void ) {
+
+  switch ( state) {
+
+    case DISARMED:
+      // set all outputs as appropriate
+      break;
+
+    case ARMED:
+      // set all outputs as appropriate
+      break;
+
+    case TRIGGERED:
+      // set all outputs as appropriate
+      // set timer
+      break;
+
+    default:
+      // shoul'd get here
+      break;
+  }
+}
+
+void DoInState( void ) {
+
+  switch ( state)
+  {
+    case DISARMED:
+      // do nothing
+      break;
+    case ARMED:
+      // check motion and accel thresholds
+      // if exceeded, call TranstionFSM( TRG_SIG );
+      break;
+    case TRIGGERED:
+      // use millis() for blinking LED without blocking
+      // check for timer elapsed
+      //    if elapsed, call TransitionFSM( TMR_DONE )
+      break;
+    default:
+      // shoul'd get here
+      break;
+  }
+}
