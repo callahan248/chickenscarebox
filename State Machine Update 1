@@ -1,0 +1,266 @@
+#include <Arduino.h>
+#include <Arduino_LSM6DS3.h>
+
+// Define all pins/ variables to use
+
+#define pirPin 8
+#define solenoidPin 9
+// #define armedSound (PIN#) // This will play a sound from pin 0
+// #define disarmedSound (PIN#) // This will play a sound from pin 1
+// #define triggerSound1 (PIN#) // This will play a sound from pin 2
+// #define triggerSound2 (PIN#) // This will play a sound from pin 3
+// Add sound variables whenever I want to (same format as above)
+
+// LED Pins wont change, also needed to blink LEDs using millis
+const int redLed = 2;
+const int greenLed = 3;
+const int blueLed = 4; // Acting as solenoid pin for testing
+const int yellowLed = 5;
+
+// Led States to blink the disarmed (yellow) LED
+int yellowLedState = LOW;
+unsigned long previousMillis = 0;
+const long blinkInterval = 1000; // interval at which to blink (milliseconds)
+
+// gyroscope values
+float Gx, Gy, Gz;
+
+// Inputs from the app (Switches and buttons on dashboard)
+bool pir_sensor;
+bool armButton;
+bool triggerButton;
+bool manualButton;
+
+// name the state machine inputs/buttons from the app
+typedef enum
+{
+  ARM_ON,   // arm button
+  TRG_SIG,  // signal from either the PIR sensor, Gyro, or manual button
+  ARM_OFF,  // disarm button
+  TRG_BTN,  // manual trigger button
+  TMR_DONE, // timer of the events
+} TransitionEvent_e;
+
+// State Names
+typedef enum
+{
+  DISARMED,
+  ARMED,
+  TRIGGERED,
+} state_e;
+
+// The starting state upon powering on
+int state = DISARMED;
+
+// functions (looks like these will be in the void loop portion?)
+void TransitionFSM(TransitionEvent_e event);
+void EnterState(void);
+void DoInState(void);
+
+// These are the transition events from the app button inputs that will send the FSM to the next state
+void TransitionFSM(TransitionEvent_e event)
+{
+  // initial "valid transition = not valid"
+  int validTransition = 0;
+  switch (state)
+  {
+  case DISARMED: // While in the disarmed state, allow either the "arm event" or "trigger button" event to transition FSM to "triggered"
+    if (event == ARM_ON)
+    {
+      validTransition = 1;
+      state = ARMED;
+    }
+    else if (event == TRG_BTN)
+    {
+      validTransition = 1;
+      state = TRIGGERED;
+    }
+    break;
+
+  case ARMED: // While in the armed state, allow either the "disarm event", "trigger signal" or "trigger button" to transition states
+    if (event == ARM_OFF)
+    {
+      validTransition = 1;
+      state = DISARMED;
+    }
+    else if (event == TRG_SIG)
+    {
+      validTransition = 1;
+      state = TRIGGERED;
+    }
+    else if (event == TRG_BTN)
+    {
+      validTransition = 1;
+      state = TRIGGERED;
+    }
+
+    break;
+
+  case TRIGGERED: // While in the triggered state, wait for the timer to complete. Then, the transition will take it back to the disarmed state
+    if (event == TMR_DONE)
+    {
+      validTransition = 1;
+      state = DISARMED;
+    }
+    break;
+
+  default:
+    // shouldn't get here
+    break;
+  }
+  if (validTransition == 1)
+  { // if it's a valid transition, enter the correct state
+    EnterState();
+  }
+}
+
+void EnterState(void) // "enter state" = set the inputs, outputs, and timers for each of the states. This will be what runs in the loop while in the state
+{
+  switch (state)
+  {
+  case DISARMED:
+    // set all outputs as appropriate
+    // Blink Yellow LED without delay ( Millis(); )
+    unsigned long currentMillis = millis();
+    if (currentMillis - previousMillis >= blinkInterval)
+    {
+      previousMillis = currentMillis;
+      if (yellowLedState == LOW)
+      {
+        yellowLedState = HIGH;
+      }
+      else
+      {
+        yellowLedState = LOW;
+      }
+    }
+    digitalWrite(redLed, LOW);
+    digitalWrite(greenLed, LOW);
+    digitalWrite(blueLed, LOW);
+    // digitalWrite (disarmedSound, HIGH); play sound "disarmed" set to a certain pin 1 time (still need to add 5 sec timer)
+    break;
+
+  case ARMED:
+    // set all outputs as appropriate
+    digitalWrite(yellowLed, LOW);
+    digitalWrite(redLed, HIGH);
+    digitalWrite(greenLed, LOW);
+    digitalWrite(blueLed, LOW);
+    // digitalWrite (armedSound, HIGH); play sound "disarmed" set to a certain pin 1 time (still need to add 5 sec timer)
+    break;
+
+  case TRIGGERED:
+    // set all outputs as appropriate
+    // set timer for the events
+    digitalWrite(yellowLed, LOW);
+    digitalWrite(redLed, LOW);
+    digitalWrite(greenLed, HIGH);
+    digitalWrite(blueLed, HIGH); //(still need to add 5 sec timer)
+    // digitalWrite (soundPin1, HIGH); play "Sound 1" set to a certain pin 1 time (still need to add 5 sec timer)
+    break;
+
+  default:
+    // shouldn't get here, but Ill add the disarmed variables for the sake of the arduino code
+    unsigned long currentMillis = millis();
+    if (currentMillis - previousMillis >= blinkInterval)
+    {
+      previousMillis = currentMillis;
+      if (yellowLedState == LOW)
+      {
+        yellowLedState = HIGH;
+      }
+      else
+      {
+        yellowLedState = LOW;
+      }
+    }
+    digitalWrite(redLed, LOW);
+    digitalWrite(greenLed, LOW);
+    digitalWrite(blueLed, LOW);
+    // digitalWrite (disarmedSound, HIGH); play sound "disarmed" set to a certain pin 1 time (still need to add 5 sec timer)
+    break;
+  }
+}
+
+// "DoInState" calls the transition when the conditions are met
+void DoInState(void)
+{
+  switch (state)
+  {
+  case DISARMED:
+    // do nothing
+    // allow manual control?
+    break;
+
+  case ARMED:
+    // start checking motion detector and gyro thresholds
+    IMU.readGyroscope(Gx, Gy, Gz);
+    pir_sensor = digitalRead(pirPin);
+
+    if ((pir_sensor == HIGH) || (Gy > 50 || Gy < -50))
+    {
+      // if exceeded, call TranstionFSM( TRG_SIG );
+      void TransitionFSM(TransitionEvent_e TRG_SIG); // Was getting an error when I called "void TransitionFSM (TRG_SIG)", so I added the "TransitionEvent_e" and it went away
+    }
+    break;
+
+  case TRIGGERED:
+    // use millis() for blinking LED without blocking
+    // check for timer elapsed
+    //    if elapsed, call TransitionFSM( TMR_DONE )
+    break;
+
+  default:
+    // shoul'd get here
+    break;
+  }
+}
+void setup()
+{
+  pinMode(redLed, OUTPUT);
+  pinMode(greenLed, OUTPUT);
+  pinMode(blueLed, OUTPUT);
+  pinMode(pirPin, INPUT);
+  // Initialize the serial monitor isn't needed at this point unless I want to manually check the state?
+  Serial.begin(9600);
+  delay(1500);
+  // IMU.begin;
+}
+
+void loop()
+{ // Cant remember what else to add in this section
+  DoInState();
+}
+
+void onArmButtonChange()
+{ // Follow this code as an example to set the armed/ disarmed states via Phone/app
+  TransitionEvent_e event;
+  if (armButton == true)
+  {
+    TransitionFSM(ARM_ON);
+  }
+  else
+  {
+    TransitionFSM(ARM_OFF);
+  }
+}
+
+// void onPirSensorChange()  {
+//  update the app so I can tell if there will be too many false triggers?
+//}
+
+// void onShakeSensorChange()  {
+//  update the app so I can tell if I need to change the gyro thresholds?
+//}
+
+// void alarmActivate ()  {
+//  This code will be moved/changed to the triggered
+// }
+
+// void onManualEventChange()  {
+//  add code to act upon manual event change
+// }
+
+// void onSwitchDummyVarChange()  {
+//  This was to test the apps ability to activate the switch on the app
+//}
