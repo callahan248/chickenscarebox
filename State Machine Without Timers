@@ -1,0 +1,243 @@
+#include <Arduino.h>
+#include <Arduino_LSM6DS3.h>
+
+
+// Inputs from the app (Switches and buttons on dashboard)
+bool armButton;
+bool triggerButton;
+bool stopButton;
+bool pir_sensor;
+
+const int redLed = 2;
+const int greenLed = 3;
+const int yellowLed = 4;
+const int blueLed = 5; // Acting as solenoid pin for testing
+const int armedSound = 6;
+const int disarmedSound = 7;
+const int triggerSound = 8;
+
+int pirPin = A5;
+int pirState = 0;
+
+int eventCount = 0;
+int blinkCount = 0;
+
+unsigned long prevTime = 0;
+
+
+// transition names
+typedef enum
+{
+  ARM_ON,   // arm button
+  TRG_SIG,  // signal from either the PIR sensor, Gyro, or manual button
+  ARM_OFF,  // disarm button
+  TRG_BTN,  // manual trigger button
+  STOP_BTN, // stop button
+  // TMR_DONE, // timer of the events
+} TransitionEvent_e;
+
+// State Names
+typedef enum
+{
+  DISARMED,
+  ARMED,
+  TRIGGERED,
+} state_e;
+
+// The starting state upon powering on
+int state = DISARMED;
+
+// functions (looks like these will be in the void loop portion?)
+void TransitionFSM(TransitionEvent_e event);
+void EnterState(void);
+void DoInState(void);
+
+// These are the transition events
+void TransitionFSM(TransitionEvent_e event)
+{
+  // initial "valid transition = not valid"
+  int validTransition = 0;
+  switch (state)
+  {
+  case DISARMED: // While in the disarmed state, allow either the "arm event" or "trigger button" event to transition FSM to "triggered"
+    if (event == ARM_ON)
+    {
+      validTransition = 1;
+      state = ARMED;
+    }
+    else if (event == TRG_BTN)
+    {
+      validTransition = 1;
+      state = TRIGGERED;
+    }
+    break;
+
+  case ARMED: // While in the armed state, allow either the "disarm event", "trigger signal" or "trigger button" to transition states
+    if (event == ARM_OFF)
+    {
+      validTransition = 1;
+      state = DISARMED;
+    }
+    else if (event == TRG_SIG)
+    {
+      validTransition = 1;
+      state = TRIGGERED;
+    }
+    else if (event == TRG_BTN)
+    {
+      validTransition = 1;
+      state = TRIGGERED;
+    }
+
+    break;
+
+  case TRIGGERED:          
+    if (event == STOP_BTN) 
+    {
+      validTransition = 1;
+      state = DISARMED;
+    }
+    break;
+
+  default:
+    break;
+  }
+
+  if (validTransition == 1)
+  { // if it's a valid transition, enter the correct state
+    EnterState();
+  }
+}
+
+void EnterState(void) // "enter state" = set the inputs, outputs, and timers for each of the states. This will be what runs in the loop while in the state
+{
+  switch (state)
+  {
+  case DISARMED:
+    // set all outputs as appropriate
+    Serial.println("DISARMED");
+    digitalWrite (yellowLed, HIGH);
+    digitalWrite (redLed, LOW);
+    digitalWrite (greenLed, LOW);
+    digitalWrite (blueLed, LOW);
+    // digitalWrite (disarmedSound, HIGH); play sound "disarmed" set to a certain pin 1 time (still need to add 5 sec timer)
+    break;
+
+  case ARMED:
+    // set all outputs as appropriate
+    Serial.println("ARMED");
+    digitalWrite (yellowLed, LOW);
+    digitalWrite (redLed, HIGH);
+    digitalWrite (greenLed, LOW);
+    digitalWrite (blueLed, LOW);
+    // digitalWrite (armedSound, HIGH); play sound "disarmed" set to a certain pin 1 time (still need to add 5 sec timer)
+    break;
+
+  case TRIGGERED:
+    // set all outputs as appropriate
+    // set timer for the events
+    Serial.println("Triggered");
+    digitalWrite(yellowLed, HIGH);
+    digitalWrite(redLed, HIGH);
+    digitalWrite(greenLed, HIGH);
+    digitalWrite(blueLed, HIGH); //(still need to add 5 sec timer)
+    // digitalWrite (soundPin1, HIGH); play "Sound 1" set to a certain pin 1 time (still need to add 5 sec timer)
+    break;
+
+  default:
+    digitalWrite(redLed, LOW);
+    digitalWrite(greenLed, LOW);
+    digitalWrite(blueLed, LOW);
+    // digitalWrite (disarmedSound, HIGH); play sound "disarmed" set to a certain pin 1 time (still need to add 5 sec timer)
+    break;
+  }
+}
+
+// "DoInState" calls the transition when the conditions are met
+void DoInState(void)
+{
+  switch (state)
+  {
+  case DISARMED:
+    if (triggerButton == HIGH)
+    {
+      void TransitionFSM(TransitionEvent_e TRG_BTN);
+    }
+    break;
+
+  case ARMED:
+    // start checking motion detector and gyro thresholds
+    // IMU.readGyroscope(Gx, Gy, Gz);
+    pir_sensor = digitalRead(pirPin);
+
+    if (pir_sensor == HIGH) //|| (Gy > 50 || Gy < -50))
+    {
+      void TransitionFSM(TransitionEvent_e TRG_SIG); 
+    }
+    break;
+
+  case TRIGGERED:
+    if (stopButton == HIGH)
+    {
+      void TransitionFSM(TransitionEvent_e STOP_BTN);
+    }
+    break;
+
+  default:
+    break;
+  }
+}
+
+//Functions That the Arduino IOT Cloud creates
+
+void OnArmButtonChange() // Takes the App booleans and we use those to transition
+{ 
+  TransitionEvent_e event;
+  if (armButton == true)
+  {
+    TransitionFSM(ARM_ON);
+  }
+  else
+  {
+    TransitionFSM(ARM_OFF);
+  }
+}
+
+void OntriggerButtonChange()
+{
+  TransitionEvent_e event;
+  if (triggerButton == true)
+  {
+    TransitionFSM(TRG_BTN);
+  }
+}
+
+void OnstopButtonChange()
+{
+  TransitionEvent_e event;
+  if (stopButton == true)
+  {
+    TransitionFSM(STOP_BTN);
+  }
+}
+
+void setup()
+{
+  pinMode(redLed, OUTPUT);
+  pinMode(greenLed, OUTPUT);
+  pinMode(yellowLed, OUTPUT);
+  pinMode(blueLed, OUTPUT);
+  pinMode(armedSound, OUTPUT); 
+  pinMode(disarmedSound, OUTPUT); 
+  pinMode(triggerSound, OUTPUT); 
+  pinMode(pirPin, INPUT);
+
+  Serial.begin(9600);
+  delay(1500);
+}
+
+void loop()
+{ 
+  DoInState();
+}
+
