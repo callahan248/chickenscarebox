@@ -1,6 +1,4 @@
 #include <Arduino.h>
-#include <Arduino_LSM6DS3.h>
-
 
 // Inputs from the app (Switches and buttons on dashboard)
 bool armButton;
@@ -22,7 +20,9 @@ int pirState = 0;
 int eventCount = 0;
 int blinkCount = 0;
 
-unsigned long prevTime = 0;
+
+unsigned long yellowLed_PreviousMillis = 0;
+unsigned long yellowLed_BlinkInterval = 1000;           // interval at which to blink (milliseconds)
 
 
 // transition names
@@ -156,9 +156,24 @@ void EnterState(void) // "enter state" = set the inputs, outputs, and timers for
 // "DoInState" calls the transition when the conditions are met
 void DoInState(void)
 {
+  unsigned long currentMillis = millis();
   switch (state)
   {
   case DISARMED:
+    if (currentMillis - yellowLed_PreviousMillis >= yellowLed_BlinkInterval)
+    {
+      // save the last time you blinked the LED
+      yellowLed_PreviousMillis = currentMillis;
+      if( digitalRead(yellowLed) == HIGH )
+      {
+        digitalWrite(yellowLed, LOW);
+      }
+      else
+      {
+        digitalWrite(yellowLed, HIGH);
+      }
+    }
+
     if (triggerButton == HIGH)
     {
       void TransitionFSM(TransitionEvent_e TRG_BTN);
@@ -240,4 +255,6 @@ void loop()
 { 
   DoInState();
 }
+
+
 
